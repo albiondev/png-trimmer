@@ -32,7 +32,15 @@
   canvas { max-width:100%; max-height:320px; width:auto; height:auto; image-rendering:auto; }
   .steps { line-height:1.55; }
   .hidden { display:none !important; }
-  .status { min-height:1.4em; }
+  .status-row { display:flex; align-items:center; gap:9px; min-height:1.8em; }
+  .status { min-height:1.4em; margin:0; }
+  .spinner { width:16px; height:16px; flex:0 0 16px; border:2px solid color-mix(in srgb, CanvasText 20%, transparent);
+    border-top-color:CanvasText; border-radius:50%; animation:spin .75s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  .progress-wrap { margin:8px 0 18px; }
+  .progress-track { height:8px; border-radius:999px; overflow:hidden; background:color-mix(in srgb, CanvasText 12%, transparent); }
+  .progress-bar { height:100%; width:0%; border-radius:999px; background:CanvasText; transition:width .15s ease; }
+  .progress-text { margin-top:6px; font-size:.85rem; opacity:.7; }
   .note { font-size:.9rem; }
 </style>
 </head>
@@ -93,6 +101,13 @@
   const fileInput = document.getElementById('file');
   const download = document.getElementById('download');
   const status = document.getElementById('status');
+  const spinner = document.getElementById('spinner');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressBar = document.getElementById('progressBar');
+  const progressText = document.getElementById('progressText');
+  const sizeSelect = document.getElementById('size');
+  const customWrap = document.getElementById('customWrap');
+  const customSize = document.getElementById('customSize');
   const stats = document.getElementById('stats');
   const preview = document.getElementById('preview');
   const empty = document.getElementById('empty');
@@ -103,10 +118,6 @@
 
   let outputBlob = null;
   let outputName = 'trimmed-300px.png';
-  const sizeSelect = document.getElementById('size');
-  const customWrap = document.getElementById('customWrap');
-  const customSize = document.getElementById('customSize');
-
   function getMaxSize() {
     if (sizeSelect.value === 'custom') {
       const n = Number.parseInt(customSize.value, 10);
@@ -135,6 +146,23 @@
     }
   });
 
+  function setProgress(percent, text) {
+    progressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+    progressText.textContent = text;
+  }
+
+  function setBusy(busy) {
+    spinner.classList.toggle('hidden', !busy);
+    progressWrap.classList.toggle('hidden', !busy);
+    sizeSelect.disabled = busy;
+    customSize.disabled = busy;
+    fileInput.disabled = busy;
+  }
+
+  function yieldToBrowser() {
+    return new Promise(resolve => setTimeout(resolve, 0));
+  }
+
   async function processCurrentFile() {
     const file = fileInput.files?.[0];
     if (!file) return;
@@ -144,24 +172,39 @@
     stats.classList.add('hidden');
     preview.classList.add('hidden');
     empty.classList.add('hidden');
-    status.textContent = 'Processing locally…';
+    setBusy(true);
+    setProgress(3, 'Reading PNG…');
+    status.textContent = `Loading ${file.name}…`;
 
     const maxSize = getMaxSize();
     outputName = (file.name.replace(/\.png$/i, '') || 'image') + `-trimmed-${maxSize}px.png`;
 
     try {
+      await yieldToBrowser();
+      setProgress(10, 'Decoding image…');
+      status.textContent = 'Loading image data…';
       const bitmap = await createImageBitmap(file);
       const w = bitmap.width, h = bitmap.height;
       original.textContent = `${w} × ${h} px`;
+
+      await yieldToBrowser();
+      setProgress(20, `Scanning ${w.toLocaleString()} × ${h.toLocaleString()} pixels…`);
+      status.textContent = 'Scanning for transparent pixels…';
 
       const scan = document.createElement('canvas');
       scan.width = w;
       scan.height = h;
       const sctx = scan.getContext('2d', { willReadFrequently: true });
       sctx.drawImage(bitmap, 0, 0);
+
+      // Reading the full image in one call is fast for normal images, but can
+      // briefly freeze the UI for very large PNGs. The status/progress remains
+      // visible so the user knows the operation is still underway.
       const data = sctx.getImageData(0, 0, w, h).data;
 
       let minX = w, minY = h, maxX = -1, maxY = -1;
+      const totalRows = h;
+      const rowStep = Math.max(1, Math.floor(totalRows / 40));
 
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
@@ -172,10 +215,18 @@
             if (y > maxY) maxY = y;
           }
         }
+        if (y % rowStep === 0) {
+          const pct = 20 + (y / totalRows) * 45;
+          setProgress(pct, `Scanning pixels… ${Math.round((y / totalRows) * 100)}%`);
+        }
       }
+
       bitmap.close();
+      await yieldToBrowser();
 
       if (maxX < 0) {
+        setProgress(100, 'Finished');
+        setBusy(false);
         status.textContent = 'This PNG is completely transparent.';
         empty.classList.remove('hidden');
         return;
@@ -185,6 +236,10 @@
       const cropH = maxY - minY + 1;
       trimmed.textContent = `${cropW} × ${cropH} px`;
 
+      setProgress(70, 'Cropping transparent edges…');
+      status.textContent = 'Cropping transparent edges…';
+      await yieldToBrowser();
+
       const scale = Math.min(maxSize / cropW, maxSize / cropH, 1);
       const outW = Math.max(1, Math.round(cropW * scale));
       const outH = Math.max(1, Math.round(cropH * scale));
@@ -192,6 +247,8 @@
       canvas.width = outW;
       canvas.height = outH;
 
+      setProgress(82, `Resizing to ${outW.toLocaleString()} × ${outH.toLocaleString()} px…`);
+      status.textContent = 'Resizing image…';
       const ctx = canvas.getContext('2d');
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
@@ -201,6 +258,10 @@
       ctx.drawImage(source, minX, minY, cropW, cropH, 0, 0, outW, outH);
       source.close();
 
+      await yieldToBrowser();
+      setProgress(94, 'Creating PNG…');
+      status.textContent = 'Creating the finished PNG…';
+
       outputBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
       if (!outputBlob) throw new Error('Could not create PNG');
 
@@ -208,10 +269,15 @@
       download.disabled = false;
       stats.classList.remove('hidden');
       preview.classList.remove('hidden');
+      setProgress(100, 'Finished');
       status.textContent = `Done — trimmed and resized locally to fit within ${maxSize} px.`;
+      setBusy(false);
     } catch (err) {
       console.error(err);
-      status.textContent = 'Could not process that PNG. Please try another PNG file.';
+      setBusy(false);
+      progressWrap.classList.add('hidden');
+      spinner.classList.add('hidden');
+      status.textContent = 'Could not process that PNG. If it is very large, try a smaller image or a desktop browser.';
     }
   }
 

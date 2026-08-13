@@ -6,12 +6,5 @@
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
   "description": "Trim fully transparent pixels from PNGs and resize them locally.",
-  "icons": [
-    {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
-    }
-  ]
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
 }
