@@ -69,7 +69,14 @@
     <button id="download" type="button" disabled>Download PNG</button>
   </div>
 
-  <p id="status" class="status">Choose a PNG to trim transparent pixels and resize it proportionally so its largest dimension fits within the selected maximum.</p>
+  <div class="status-row">
+    <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
+    <p id="status" class="status" aria-live="polite">Choose a PNG to trim transparent pixels and resize it proportionally so its largest dimension fits within the selected maximum.</p>
+  </div>
+  <div id="progressWrap" class="progress-wrap hidden" aria-hidden="true">
+    <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+    <div id="progressText" class="progress-text">Starting…</div>
+  </div>
 
   <div id="stats" class="stats hidden">
     <div class="stat"><small>Original</small><strong id="original">—</strong></div>
