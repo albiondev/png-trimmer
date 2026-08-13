@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PNG Trimmer">
+<title>Transparent PNG Trimmer</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { margin: 0; padding: 24px; background: Canvas; color: CanvasText; }
+  main { max-width: 760px; margin: auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 8px; }
+  p { color: color-mix(in srgb, CanvasText 65%, transparent); }
+  .controls { display:flex; flex-wrap:wrap; gap:10px; margin:20px 0; }
+  button, label { display:inline-flex; align-items:center; justify-content:center; padding:10px 16px;
+    border:1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius:10px;
+    background:ButtonFace; color:ButtonText; cursor:pointer; font:inherit; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  input { display:none; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin:18px 0; }
+  .stat { border:1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius:12px; padding:14px; }
+  .stat small { display:block; opacity:.65; margin-bottom:5px; }
+  .stat strong { font-size:1.1rem; }
+  .preview { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+  @media (max-width:650px) { .preview { grid-template-columns:1fr; } }
+  .box { border:1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius:12px; padding:16px; }
+  .checker {
+    min-height:220px; display:flex; align-items:center; justify-content:center; overflow:hidden;
+    background-image:linear-gradient(45deg,#aaa 25%,transparent 25%,transparent 75%,#aaa 75%),
+                      linear-gradient(45deg,#aaa 25%,transparent 25%,transparent 75%,#aaa 75%);
+    background-position:0 0,10px 10px; background-size:20px 20px;
+  }
+  canvas { max-width:100%; max-height:320px; width:auto; height:auto; image-rendering:auto; }
+  .steps { line-height:1.55; }
+  .hidden { display:none !important; }
+  .status { min-height:1.4em; }
+  .note { font-size:.9rem; }
+</style>
+<link rel="apple-touch-icon" href="icon.svg">
+</head>
+<body>
+<main>
+  <h1>Transparent PNG Trimmer</h1>
+  <p>Choose a PNG. Everything happens locally in this browser — no server, upload, storage, or network connection is used.</p>
+
+  <div class="controls">
+    <label>Choose PNG<input id="file" type="file" accept="image/png"></label>
+    <button id="download" type="button" disabled>Download PNG</button>
+    <button id="savePhotos" type="button" disabled>Save to Photos</button>
+    <button id="openSafari" type="button">Open in Safari</button>
+  </div>
+
+  <p id="status" class="status">Choose a PNG to trim transparent pixels and resize it to fit within 300 × 300 px.</p>
+
+  <div id="stats" class="stats hidden">
+    <div class="stat"><small>Original</small><strong id="original">—</strong></div>
+    <div class="stat"><small>Trimmed</small><strong id="trimmed">—</strong></div>
+    <div class="stat"><small>Output</small><strong id="output">—</strong></div>
+  </div>
+
+  <div id="preview" class="preview hidden">
+    <section>
+      <h2>Preview</h2>
+      <div class="box checker"><canvas id="canvas"></canvas></div>
+    </section>
+    <section>
+      <h2>How it works</h2>
+      <div class="box steps">
+        <p><strong>1. Detect:</strong> finds the smallest rectangle containing every non-transparent pixel.</p>
+        <p><strong>2. Crop:</strong> removes transparent pixels around the outside only.</p>
+        <p><strong>3. Resize:</strong> scales proportionally so neither dimension exceeds 300 px.</p>
+      </div>
+    </section>
+  </div>
+
+  <div id="empty" class="box hidden">The image contains no visible pixels, so there is nothing to crop.</div>
+
+  <details class="box" style="margin-top:18px">
+    <summary><strong>Using this on iPhone</strong></summary>
+    <div style="margin-top:12px">
+      <p><strong>Important:</strong> iOS does not let a local HTML file in the Files app force itself into Safari. This is an Apple security restriction, so no button inside the file can reliably launch Safari from Files.</p>
+      <p><strong>If the file is already open in Safari:</strong> use <em>Open in Safari</em> above. If you opened the file from Dropbox, look for Dropbox's <em>Open in browser</em> option rather than its file preview.</p>
+      <p><strong>If you are viewing the file in Files:</strong> tap <em>Share</em> and look for Safari in the share sheet. If Safari is not offered, save the file somewhere accessible to Safari or use a web-hosted copy.</p>
+      <p>Once the tool is running in Safari, <strong>Save to Photos</strong> opens the processed PNG in a new tab. Press and hold the image and choose <em>Save to Photos</em> / <em>Add to Photos</em>.</p>
+    </div>
+  </details>
+  <p class="note">Note: every pixel with zero alpha is removed from the outside edge. Any partially transparent pixel is retained because it belongs to the artwork.</p>
+</main>
+
+<script>
+(() => {
+  const fileInput = document.getElementById('file');
+  const download = document.getElementById('download');
+  const savePhotos = document.getElementById('savePhotos');
+  const openSafari = document.getElementById('openSafari');
+  const status = document.getElementById('status');
+  const stats = document.getElementById('stats');
+  const preview = document.getElementById('preview');
+  const empty = document.getElementById('empty');
+  const original = document.getElementById('original');
+  const trimmed = document.getElementById('trimmed');
+  const output = document.getElementById('output');
+  const canvas = document.getElementById('canvas');
+
+  let outputBlob = null;
+  let outputName = 'trimmed-300px.png';
+
+  openSafari.addEventListener('click', () => {
+    const url = window.location.href;
+    const win = window.open(url, '_blank');
+    if (!win) {
+      status.textContent = 'This file cannot force Safari to open it. On iPhone, use Share → Safari from the Files/Dropbox interface if Safari is available.';
+    }
+  });
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    outputBlob = null;
+    download.disabled = true;
+    savePhotos.disabled = true;
+    stats.classList.add('hidden');
+    preview.classList.add('hidden');
+    empty.classList.add('hidden');
+    status.textContent = 'Processing locally…';
+    outputName = (file.name.replace(/\.png$/i, '') || 'image') + '-trimmed-300px.png';
+
+    try {
+      const bitmap = await createImageBitmap(file);
+      const w = bitmap.width, h = bitmap.height;
+      original.textContent = `${w} × ${h} px`;
+
+      const scan = document.createElement('canvas');
+      scan.width = w;
+      scan.height = h;
+      const sctx = scan.getContext('2d', { willReadFrequently: true });
+      sctx.drawImage(bitmap, 0, 0);
+      const data = sctx.getImageData(0, 0, w, h).data;
+
+      let minX = w, minY = h, maxX = -1, maxY = -1;
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          if (data[(y * w + x) * 4 + 3] > 0) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      bitmap.close();
+
+      if (maxX < 0) {
+        status.textContent = 'This PNG is completely transparent.';
+        empty.classList.remove('hidden');
+        return;
+      }
+
+      const cropW = maxX - minX + 1;
+      const cropH = maxY - minY + 1;
+      trimmed.textContent = `${cropW} × ${cropH} px`;
+
+      const scale = Math.min(300 / cropW, 300 / cropH, 1);
+      const outW = Math.max(1, Math.round(cropW * scale));
+      const outH = Math.max(1, Math.round(cropH * scale));
+
+      canvas.width = outW;
+      canvas.height = outH;
+
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+
+      const source = await createImageBitmap(file);
+      ctx.clearRect(0, 0, outW, outH);
+      ctx.drawImage(source, minX, minY, cropW, cropH, 0, 0, outW, outH);
+      source.close();
+
+      outputBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+
+      if (!outputBlob) throw new Error('Could not create PNG');
+
+      output.textContent = `${outW} × ${outH} px`;
+      download.disabled = false;
+      savePhotos.disabled = false;
+      stats.classList.remove('hidden');
+      preview.classList.remove('hidden');
+      status.textContent = 'Done — the image was processed entirely in your browser.';
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'Could not process that PNG. Please try another PNG file.';
+    }
+  });
+
+  download.addEventListener('click', () => {
+    if (!outputBlob) return;
+    const url = URL.createObjectURL(outputBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = outputName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  savePhotos.addEventListener('click', async () => {
+    if (!outputBlob) return;
+
+    // On iPhone/iPad, the most reliable browser-only workflow is to open
+    // the generated PNG in a new tab. From there, long-press the image and
+    // choose “Save to Photos” / “Add to Photos” in Safari.
+    const url = URL.createObjectURL(outputBlob);
+    const win = window.open(url, '_blank');
+
+    if (!win) {
+      status.textContent = 'Safari blocked the preview window. Tap Download PNG, then open the downloaded image and save it to Photos.';
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      return;
+    }
+
+    status.textContent = 'Image opened in a new tab. On iPhone, press and hold the image, then choose “Save to Photos” or “Add to Photos”.';
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  });
+})();
+</script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
