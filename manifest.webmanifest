@@ -1,10 +1,9 @@
 {
-  "name": "Transparent PNG Trimmer",
-  "short_name": "PNG Trimmer",
-  "start_url": "./",
-  "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#ffffff",
-  "description": "Trim fully transparent pixels from PNGs and resize them locally.",
-  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "name":"Transparent PNG Trimmer",
+  "short_name":"PNG Trimmer",
+  "start_url":"./",
+  "display":"standalone",
+  "background_color":"#ffffff",
+  "theme_color":"#ffffff",
+  "icons":[{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
 }

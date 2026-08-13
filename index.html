@@ -54,6 +54,7 @@
     <label>Choose PNG<input id="file" type="file" accept="image/png"></label>
     <label style="gap:8px">Maximum dimension
       <select id="size" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
+        <option value="150">150 px</option>
         <option value="300" selected>300 px</option>
         <option value="600">600 px</option>
         <option value="800">800 px</option>
@@ -66,9 +67,22 @@
              style="display:block;width:100px;border:0;background:transparent;color:inherit;font:inherit;outline:none">
       <span>px</span>
     </label>
+    <label style="gap:8px">Output shape
+      <select id="outputMode" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
+        <option value="fit" selected>Fit artwork (preserve aspect ratio)</option>
+        <option value="square">Square canvas (center artwork)</option>
+      </select>
+    </label>
+    <label style="gap:8px">Rotation
+      <span id="rotationValue">0°</span>
+      <input id="rotation" type="range" min="-15" max="15" step="0.1" value="0"
+             style="display:block;width:150px">
+    </label>
+    <button id="resetRotation" type="button">Reset rotation</button>
     <button id="download" type="button" disabled>Download PNG</button>
   </div>
 
+  <p id="modeHelp" class="note">Fit artwork keeps the trimmed image’s proportions and makes its largest dimension the selected size. Rotation expands the canvas as needed so the artwork is never clipped.</p>
   <div class="status-row">
     <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
     <p id="status" class="status" aria-live="polite">Choose a PNG to trim transparent pixels and resize it proportionally so its largest dimension fits within the selected maximum.</p>
@@ -101,7 +115,7 @@
 
   <div id="empty" class="box hidden">The image contains no visible pixels, so there is nothing to crop.</div>
 
-  <p class="note">The selected value is the maximum width or height. The image keeps its original aspect ratio. Smaller images are not enlarged.</p>
+  <p class="note">Fit artwork preserves the trimmed image proportions. Square canvas makes both output dimensions exactly the selected size and centers the artwork. Rotation automatically scales the artwork down when necessary so no part is clipped.</p>
 </main>
 
 <script>
@@ -123,6 +137,11 @@
   const sizeSelect = document.getElementById('size');
   const customWrap = document.getElementById('customWrap');
   const customSize = document.getElementById('customSize');
+  const outputMode = document.getElementById('outputMode');
+  const modeHelp = document.getElementById('modeHelp');
+  const rotation = document.getElementById('rotation');
+  const rotationValue = document.getElementById('rotationValue');
+  const resetRotation = document.getElementById('resetRotation');
   const readyBadge = document.getElementById('readyBadge');
 
   let outputBlob = null;
@@ -150,6 +169,9 @@
     fileInput.disabled = busy;
     sizeSelect.disabled = busy;
     customSize.disabled = busy;
+    outputMode.disabled = busy;
+    rotation.disabled = busy;
+    resetRotation.disabled = busy;
   }
 
   function waitForBrowser() {
@@ -186,7 +208,7 @@
     readyBadge.classList.add('hidden');
 
     const maxSize = getMaxSize();
-    outputName = (file.name.replace(/\.png$/i, '') || 'image') + `-trimmed-${maxSize}px.png`;
+    outputName = (file.name.replace(/\.png$/i, '') || 'image') + `-trimmed-${maxSize}px${outputMode.value === 'square' ? '-square' : ''}${rotation.value !== '0' ? '-rotated' : ''}.png`;
 
     setBusy(true);
     setProgress(4, 'Starting…');
@@ -253,9 +275,21 @@
       status.textContent = 'Removing the transparent border…';
       await waitForBrowser();
 
-      const scale = Math.min(maxSize / cropW, maxSize / cropH, 1);
-      const outW = Math.max(1, Math.round(cropW * scale));
-      const outH = Math.max(1, Math.round(cropH * scale));
+      const angle = Number(rotation.value) * Math.PI / 180;
+      const absCos = Math.abs(Math.cos(angle));
+      const absSin = Math.abs(Math.sin(angle));
+      const rotatedW = cropW * absCos + cropH * absSin;
+      const rotatedH = cropW * absSin + cropH * absCos;
+
+      // Scale after rotation so the rotated artwork fits the requested size.
+      // This is important for square output: the corners of a rotated image
+      // must not be clipped by the fixed square canvas.
+      const scale = Math.min(maxSize / rotatedW, maxSize / rotatedH, 1);
+      const artworkW = Math.max(1, Math.ceil(rotatedW * scale));
+      const artworkH = Math.max(1, Math.ceil(rotatedH * scale));
+      const square = outputMode.value === 'square';
+      const outW = square ? maxSize : artworkW;
+      const outH = square ? maxSize : artworkH;
 
       canvas.width = outW;
       canvas.height = outH;
@@ -265,12 +299,27 @@
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      setProgress(82, `Resizing to ${outW.toLocaleString()} × ${outH.toLocaleString()} px…`);
-      status.textContent = 'Creating the trimmed preview…';
+      const centreX = square ? outW / 2 : artworkW / 2;
+      const centreY = square ? outH / 2 : artworkH / 2;
+
+      setProgress(82, `Creating ${outW.toLocaleString()} × ${outH.toLocaleString()} px preview…`);
+      status.textContent = rotation.value === '0'
+        ? (square ? 'Centering the artwork on the square canvas…' : 'Creating the trimmed preview…')
+        : 'Rotating and fitting the artwork without clipping…';
       await waitForBrowser();
 
-      ctx.drawImage(img, minX, minY, cropW, cropH, 0, 0, outW, outH);
-
+      ctx.save();
+      ctx.translate(centreX, centreY);
+      ctx.rotate(angle);
+      ctx.drawImage(
+        img,
+        minX, minY, cropW, cropH,
+        -cropW * scale / 2,
+        -cropH * scale / 2,
+        cropW * scale,
+        cropH * scale
+      );
+      ctx.restore();
       setProgress(94, 'Creating PNG…');
       status.textContent = 'Finishing the PNG…';
       await waitForBrowser();
@@ -308,6 +357,13 @@
 
   customSize.addEventListener('change', () => {
     if (currentFile && sizeSelect.value === 'custom' && !processing) processFile(currentFile);
+  });
+  outputMode.addEventListener('change', () => {
+    const square = outputMode.value === 'square';
+    modeHelp.textContent = square
+      ? 'Square canvas makes both output dimensions exactly the selected size and centers the artwork with transparent space where needed.'
+      : 'Fit artwork keeps the trimmed image’s proportions and makes its largest dimension the selected size. Rotation expands the canvas as needed so the artwork is never clipped.';
+    if (currentFile && !processing) processFile(currentFile);
   });
 
   download.addEventListener('click', () => {
