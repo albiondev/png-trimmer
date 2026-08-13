@@ -73,12 +73,20 @@
         <option value="square">Square canvas (center artwork)</option>
       </select>
     </label>
+    <label id="alignmentWrap" class="hidden" style="gap:8px">Square alignment
+      <select id="alignment" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
+        <option value="center" selected>Centre</option>
+        <option value="top">Top</option>
+        <option value="bottom">Bottom</option>
+      </select>
+    </label>
     <label style="gap:8px">Rotation
       <span id="rotationValue">0°</span>
       <input id="rotation" type="range" min="-15" max="15" step="0.1" value="0"
              style="display:block;width:150px">
     </label>
     <button id="resetRotation" type="button">Reset rotation</button>
+    <button id="updatePreview" type="button" disabled>Update Preview</button>
     <button id="download" type="button" disabled>Download PNG</button>
   </div>
 
@@ -115,13 +123,14 @@
 
   <div id="empty" class="box hidden">The image contains no visible pixels, so there is nothing to crop.</div>
 
-  <p class="note">Fit artwork preserves the trimmed image proportions. Square canvas makes both output dimensions exactly the selected size and centers the artwork. Rotation automatically scales the artwork down when necessary so no part is clipped.</p>
+  <p class="note">Fit artwork preserves the trimmed image proportions. Square canvas makes both output dimensions exactly the selected size, with optional top, centre, or bottom alignment. Rotation automatically scales the artwork down when necessary so no part is clipped.</p>
 </main>
 
 <script>
 (() => {
   const fileInput = document.getElementById('file');
   const download = document.getElementById('download');
+  const updatePreview = document.getElementById('updatePreview');
   const status = document.getElementById('status');
   const spinner = document.getElementById('spinner');
   const progressWrap = document.getElementById('progressWrap');
@@ -142,6 +151,8 @@
   const rotation = document.getElementById('rotation');
   const rotationValue = document.getElementById('rotationValue');
   const resetRotation = document.getElementById('resetRotation');
+  const alignmentWrap = document.getElementById('alignmentWrap');
+  const alignment = document.getElementById('alignment');
   const readyBadge = document.getElementById('readyBadge');
 
   let outputBlob = null;
@@ -167,11 +178,13 @@
     spinner.classList.toggle('hidden', !busy);
     progressWrap.classList.toggle('hidden', !busy);
     fileInput.disabled = busy;
+    updatePreview.disabled = busy || !currentFile;
     sizeSelect.disabled = busy;
     customSize.disabled = busy;
     outputMode.disabled = busy;
     rotation.disabled = busy;
     resetRotation.disabled = busy;
+    alignment.disabled = busy;
   }
 
   function waitForBrowser() {
@@ -202,6 +215,7 @@
     currentFile = file;
     outputBlob = null;
     download.disabled = true;
+    updatePreview.disabled = true;
     stats.classList.add('hidden');
     preview.classList.add('hidden');
     empty.classList.add('hidden');
@@ -300,7 +314,12 @@
       ctx.imageSmoothingQuality = 'high';
 
       const centreX = square ? outW / 2 : artworkW / 2;
-      const centreY = square ? outH / 2 : artworkH / 2;
+      let centreY = artworkH / 2;
+      if (square) {
+        if (alignment.value === 'top') centreY = artworkH / 2;
+        else if (alignment.value === 'bottom') centreY = outH - artworkH / 2;
+        else centreY = outH / 2;
+      }
 
       setProgress(82, `Creating ${outW.toLocaleString()} × ${outH.toLocaleString()} px preview…`);
       status.textContent = rotation.value === '0'
@@ -352,11 +371,11 @@
 
   sizeSelect.addEventListener('change', () => {
     customWrap.classList.toggle('hidden', sizeSelect.value !== 'custom');
-    if (currentFile && !processing) processFile(currentFile);
+    if (currentFile && !processing) updatePreview.disabled = false;
   });
 
   customSize.addEventListener('change', () => {
-    if (currentFile && sizeSelect.value === 'custom' && !processing) processFile(currentFile);
+    if (currentFile && sizeSelect.value === 'custom' && !processing) updatePreview.disabled = false;
   });
   outputMode.addEventListener('change', () => {
     const square = outputMode.value === 'square';
