@@ -73,7 +73,8 @@
         <option value="square">Square canvas (center artwork)</option>
       </select>
     </label>
-    <label id="alignmentWrap" class="hidden" style="gap:8px">Square alignment
+    <div id="alignmentHelp" class="note" style="display:none">When Square canvas is selected, choose where the artwork sits vertically.</div>
+    <label id="alignmentWrap" style="gap:8px">Square alignment
       <select id="alignment" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
         <option value="center" selected>Centre</option>
         <option value="top">Top</option>
@@ -153,6 +154,7 @@
   const resetRotation = document.getElementById('resetRotation');
   const alignmentWrap = document.getElementById('alignmentWrap');
   const alignment = document.getElementById('alignment');
+  const alignmentHelp = document.getElementById('alignmentHelp');
   const readyBadge = document.getElementById('readyBadge');
 
   let outputBlob = null;
