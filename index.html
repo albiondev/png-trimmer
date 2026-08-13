@@ -81,6 +81,11 @@
         <option value="bottom">Bottom</option>
       </select>
     </label>
+    <label id="artworkScaleWrap" class="hidden" style="gap:8px">Artwork size
+      <span id="artworkScaleValue">100%</span>
+      <input id="artworkScale" type="range" min="25" max="100" step="1" value="100"
+             style="display:block;width:150px">
+    </label>
     <label style="gap:8px">Rotation
       <span id="rotationValue">0°</span>
       <input id="rotation" type="range" min="-15" max="15" step="0.1" value="0"
@@ -124,7 +129,7 @@
 
   <div id="empty" class="box hidden">The image contains no visible pixels, so there is nothing to crop.</div>
 
-  <p class="note">Fit artwork preserves the trimmed image proportions. Square canvas makes both output dimensions exactly the selected size, with optional top, centre, or bottom alignment. Rotation automatically scales the artwork down when necessary so no part is clipped.</p>
+  <p class="note">Fit artwork preserves the trimmed image proportions. Square canvas makes both output dimensions exactly the selected size, with alignment and artwork-size controls. Rotation automatically scales the artwork down when necessary so no part is clipped.</p>
 </main>
 
 <script>
@@ -155,6 +160,9 @@
   const alignmentWrap = document.getElementById('alignmentWrap');
   const alignment = document.getElementById('alignment');
   const alignmentHelp = document.getElementById('alignmentHelp');
+  const artworkScaleWrap = document.getElementById('artworkScaleWrap');
+  const artworkScale = document.getElementById('artworkScale');
+  const artworkScaleValue = document.getElementById('artworkScaleValue');
   const readyBadge = document.getElementById('readyBadge');
 
   let outputBlob = null;
@@ -187,6 +195,7 @@
     rotation.disabled = busy;
     resetRotation.disabled = busy;
     alignment.disabled = busy;
+    artworkScale.disabled = busy;
   }
 
   function waitForBrowser() {
@@ -301,9 +310,12 @@
       // This is important for square output: the corners of a rotated image
       // must not be clipped by the fixed square canvas.
       const scale = Math.min(maxSize / rotatedW, maxSize / rotatedH, 1);
-      const artworkW = Math.max(1, Math.ceil(rotatedW * scale));
-      const artworkH = Math.max(1, Math.ceil(rotatedH * scale));
+      const baseArtworkW = Math.max(1, Math.ceil(rotatedW * scale));
+      const baseArtworkH = Math.max(1, Math.ceil(rotatedH * scale));
       const square = outputMode.value === 'square';
+      const sizeFactor = square ? Number(artworkScale.value) / 100 : 1;
+      const artworkW = Math.max(1, Math.round(baseArtworkW * sizeFactor));
+      const artworkH = Math.max(1, Math.round(baseArtworkH * sizeFactor));
       const outW = square ? maxSize : artworkW;
       const outH = square ? maxSize : artworkH;
 
@@ -332,13 +344,14 @@
       ctx.save();
       ctx.translate(centreX, centreY);
       ctx.rotate(angle);
+      const finalScale = scale * sizeFactor;
       ctx.drawImage(
         img,
         minX, minY, cropW, cropH,
-        -cropW * scale / 2,
-        -cropH * scale / 2,
-        cropW * scale,
-        cropH * scale
+        -cropW * finalScale / 2,
+        -cropH * finalScale / 2,
+        cropW * finalScale,
+        cropH * finalScale
       );
       ctx.restore();
       setProgress(94, 'Creating PNG…');
