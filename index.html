@@ -392,13 +392,46 @@
   customSize.addEventListener('change', () => {
     if (currentFile && sizeSelect.value === 'custom' && !processing) updatePreview.disabled = false;
   });
-  outputMode.addEventListener('change', () => {
+  function refreshSquareControls() {
     const square = outputMode.value === 'square';
+    alignmentWrap.style.display = square ? 'inline-flex' : 'none';
+    artworkScaleWrap.style.display = square ? 'inline-flex' : 'none';
+    alignmentHelp.style.display = square ? 'block' : 'none';
     modeHelp.textContent = square
-      ? 'Square canvas makes both output dimensions exactly the selected size and centers the artwork with transparent space where needed.'
+      ? 'Square canvas makes both output dimensions exactly the selected size. Choose top, centre, or bottom alignment and adjust the artwork size.'
       : 'Fit artwork keeps the trimmed image’s proportions and makes its largest dimension the selected size. Rotation expands the canvas as needed so the artwork is never clipped.';
+  }
+
+  outputMode.addEventListener('change', () => {
+    refreshSquareControls();
+    if (currentFile && !processing) updatePreview.disabled = false;
+  });
+
+  alignment.addEventListener('change', () => {
+    if (currentFile && outputMode.value === 'square' && !processing) updatePreview.disabled = false;
+  });
+
+  artworkScale.addEventListener('input', () => {
+    artworkScaleValue.textContent = `${artworkScale.value}%`;
+    if (currentFile && outputMode.value === 'square' && !processing) updatePreview.disabled = false;
+  });
+
+  rotation.addEventListener('input', () => {
+    rotationValue.textContent = `${Number(rotation.value).toFixed(1).replace('.0','')}°`;
+    if (currentFile && !processing) updatePreview.disabled = false;
+  });
+
+  resetRotation.addEventListener('click', () => {
+    rotation.value = '0';
+    rotationValue.textContent = '0°';
+    if (currentFile && !processing) updatePreview.disabled = false;
+  });
+
+  updatePreview.addEventListener('click', () => {
     if (currentFile && !processing) processFile(currentFile);
   });
+
+  refreshSquareControls();
 
   download.addEventListener('click', () => {
     if (!outputBlob) return;
