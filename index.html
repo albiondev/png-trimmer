@@ -62,7 +62,7 @@
         <option value="custom">Custom…</option>
       </select>
     </label>
-    <label id="customWrap" class="hidden" style="gap:8px">Custom max
+    <label id="customWrap" style="gap:8px">Custom max (used when Custom is selected)
       <input id="customSize" type="number" min="1" max="10000" value="300"
              style="display:block;width:100px;border:0;background:transparent;color:inherit;font:inherit;outline:none">
       <span>px</span>
@@ -73,7 +73,7 @@
         <option value="square">Square canvas (center artwork)</option>
       </select>
     </label>
-    <div id="alignmentHelp" class="note" style="display:none">When Square canvas is selected, choose where the artwork sits vertically.</div>
+    <div id="alignmentHelp" class="note">Square alignment controls the vertical position when Square canvas is selected.</div>
     <label id="alignmentWrap" style="gap:8px">Square alignment
       <select id="alignment" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
         <option value="center" selected>Centre</option>
@@ -81,7 +81,7 @@
         <option value="bottom">Bottom</option>
       </select>
     </label>
-    <label id="artworkScaleWrap" class="hidden" style="gap:8px">Artwork size
+    <label id="artworkScaleWrap" style="gap:8px">Artwork size
       <span id="artworkScaleValue">100%</span>
       <input id="artworkScale" type="range" min="25" max="100" step="1" value="100"
              style="display:block;width:150px">
@@ -385,7 +385,6 @@
   });
 
   sizeSelect.addEventListener('change', () => {
-    customWrap.classList.toggle('hidden', sizeSelect.value !== 'custom');
     if (currentFile && !processing) updatePreview.disabled = false;
   });
 
@@ -394,12 +393,9 @@
   });
   function refreshSquareControls() {
     const square = outputMode.value === 'square';
-    alignmentWrap.style.display = square ? 'inline-flex' : 'none';
-    artworkScaleWrap.style.display = square ? 'inline-flex' : 'none';
-    alignmentHelp.style.display = square ? 'block' : 'none';
     modeHelp.textContent = square
-      ? 'Square canvas makes both output dimensions exactly the selected size. Choose top, centre, or bottom alignment and adjust the artwork size.'
-      : 'Fit artwork keeps the trimmed image’s proportions and makes its largest dimension the selected size. Rotation expands the canvas as needed so the artwork is never clipped.';
+      ? 'Square canvas: both output dimensions are exactly the selected size. Alignment controls where the artwork sits, and Artwork size lets you make it smaller within the square.'
+      : 'Fit artwork: the trimmed image keeps its proportions and its largest dimension is the selected size. Square-only controls are still shown, but only affect the result when Square canvas is selected.';
   }
 
   outputMode.addEventListener('change', () => {
