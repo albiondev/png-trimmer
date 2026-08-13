@@ -32,6 +32,7 @@
   canvas { max-width:100%; max-height:320px; width:auto; height:auto; image-rendering:auto; }
   .steps { line-height:1.55; }
   .hidden { display:none !important; }
+  .ready-badge { display:inline-block; margin-left:8px; padding:3px 8px; border-radius:999px; font-size:.75rem; background:#1f7a3f; color:#fff; vertical-align:middle; }
   .status-row { display:flex; align-items:center; gap:9px; min-height:1.8em; }
   .status { min-height:1.4em; margin:0; }
   .spinner { width:16px; height:16px; flex:0 0 16px; border:2px solid color-mix(in srgb, CanvasText 20%, transparent);
@@ -78,7 +79,7 @@
 
   <div id="preview" class="preview hidden">
     <section>
-      <h2>Preview</h2>
+      <h2>Preview <span id="readyBadge" class="ready-badge hidden">READY</span></h2>
       <div class="box checker"><canvas id="canvas"></canvas></div>
     </section>
     <section>
@@ -105,9 +106,6 @@
   const progressWrap = document.getElementById('progressWrap');
   const progressBar = document.getElementById('progressBar');
   const progressText = document.getElementById('progressText');
-  const sizeSelect = document.getElementById('size');
-  const customWrap = document.getElementById('customWrap');
-  const customSize = document.getElementById('customSize');
   const stats = document.getElementById('stats');
   const preview = document.getElementById('preview');
   const empty = document.getElementById('empty');
@@ -115,9 +113,16 @@
   const trimmed = document.getElementById('trimmed');
   const output = document.getElementById('output');
   const canvas = document.getElementById('canvas');
+  const sizeSelect = document.getElementById('size');
+  const customWrap = document.getElementById('customWrap');
+  const customSize = document.getElementById('customSize');
+  const readyBadge = document.getElementById('readyBadge');
 
   let outputBlob = null;
   let outputName = 'trimmed-300px.png';
+  let currentFile = null;
+  let processing = false;
+
   function getMaxSize() {
     if (sizeSelect.value === 'custom') {
       const n = Number.parseInt(customSize.value, 10);
@@ -126,103 +131,104 @@
     return Number(sizeSelect.value);
   }
 
-  function updateSizeControls() {
-    customWrap.classList.toggle('hidden', sizeSelect.value !== 'custom');
-  }
-
-  sizeSelect.addEventListener('change', updateSizeControls);
-  customSize.addEventListener('input', () => {
-    if (sizeSelect.value === 'custom') processCurrentFile();
-  });
-  sizeSelect.addEventListener('change', () => {
-    if (fileInput.files?.[0]) processCurrentFile();
-  });
-
-  openSafari.addEventListener('click', () => {
-    const url = window.location.href;
-    const win = window.open(url, '_blank');
-    if (!win) {
-      status.textContent = 'This file cannot force Safari to open it. On iPhone, use Share → Safari from the Files/Dropbox interface if Safari is available.';
-    }
-  });
-
   function setProgress(percent, text) {
     progressBar.style.width = `${Math.max(0, Math.min(100, percent))}%`;
     progressText.textContent = text;
   }
 
   function setBusy(busy) {
+    processing = busy;
     spinner.classList.toggle('hidden', !busy);
     progressWrap.classList.toggle('hidden', !busy);
+    fileInput.disabled = busy;
     sizeSelect.disabled = busy;
     customSize.disabled = busy;
-    fileInput.disabled = busy;
   }
 
-  function yieldToBrowser() {
-    return new Promise(resolve => setTimeout(resolve, 0));
+  function waitForBrowser() {
+    return new Promise(resolve => setTimeout(resolve, 20));
   }
 
-  async function processCurrentFile() {
-    const file = fileInput.files?.[0];
-    if (!file) return;
+  // Image() + object URL is more broadly compatible with iOS Safari/PWA
+  // than relying on createImageBitmap for every PNG.
+  function loadImage(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Image could not be decoded'));
+      };
+      img.src = url;
+    });
+  }
 
+  async function processFile(file) {
+    if (!file || processing) return;
+
+    currentFile = file;
     outputBlob = null;
     download.disabled = true;
     stats.classList.add('hidden');
     preview.classList.add('hidden');
     empty.classList.add('hidden');
-    setBusy(true);
-    setProgress(3, 'Reading PNG…');
-    status.textContent = `Loading ${file.name}…`;
+    readyBadge.classList.add('hidden');
 
     const maxSize = getMaxSize();
     outputName = (file.name.replace(/\.png$/i, '') || 'image') + `-trimmed-${maxSize}px.png`;
 
-    try {
-      await yieldToBrowser();
-      setProgress(10, 'Decoding image…');
-      status.textContent = 'Loading image data…';
-      const bitmap = await createImageBitmap(file);
-      const w = bitmap.width, h = bitmap.height;
-      original.textContent = `${w} × ${h} px`;
+    setBusy(true);
+    setProgress(4, 'Starting…');
+    status.textContent = `Loading ${file.name}…`;
+    await waitForBrowser();
 
-      await yieldToBrowser();
-      setProgress(20, `Scanning ${w.toLocaleString()} × ${h.toLocaleString()} pixels…`);
-      status.textContent = 'Scanning for transparent pixels…';
+    try {
+      setProgress(12, 'Decoding PNG…');
+      status.textContent = 'Loading image data…';
+      const img = await loadImage(file);
+      const w = img.naturalWidth;
+      const h = img.naturalHeight;
+      original.textContent = `${w.toLocaleString()} × ${h.toLocaleString()} px`;
+      await waitForBrowser();
+
+      setProgress(22, 'Preparing pixel scan…');
+      status.textContent = 'Looking for the visible artwork…';
 
       const scan = document.createElement('canvas');
       scan.width = w;
       scan.height = h;
       const sctx = scan.getContext('2d', { willReadFrequently: true });
-      sctx.drawImage(bitmap, 0, 0);
+      if (!sctx) throw new Error('Canvas unavailable');
+      sctx.drawImage(img, 0, 0);
 
-      // Reading the full image in one call is fast for normal images, but can
-      // briefly freeze the UI for very large PNGs. The status/progress remains
-      // visible so the user knows the operation is still underway.
+      await waitForBrowser();
+      setProgress(28, 'Scanning transparent pixels…');
+      status.textContent = 'Scanning every pixel for transparency…';
+
       const data = sctx.getImageData(0, 0, w, h).data;
-
       let minX = w, minY = h, maxX = -1, maxY = -1;
-      const totalRows = h;
-      const rowStep = Math.max(1, Math.floor(totalRows / 40));
 
+      // Yield periodically so the iPhone UI can repaint the progress indicator.
+      const chunkRows = Math.max(1, Math.floor(h / 60));
       for (let y = 0; y < h; y++) {
+        const row = y * w * 4;
         for (let x = 0; x < w; x++) {
-          if (data[(y * w + x) * 4 + 3] > 0) {
+          if (data[row + x * 4 + 3] > 0) {
             if (x < minX) minX = x;
             if (x > maxX) maxX = x;
             if (y < minY) minY = y;
             if (y > maxY) maxY = y;
           }
         }
-        if (y % rowStep === 0) {
-          const pct = 20 + (y / totalRows) * 45;
-          setProgress(pct, `Scanning pixels… ${Math.round((y / totalRows) * 100)}%`);
+        if (y % chunkRows === 0) {
+          setProgress(28 + (y / h) * 40, `Scanning pixels… ${Math.round(y / h * 100)}%`);
+          await waitForBrowser();
         }
       }
-
-      bitmap.close();
-      await yieldToBrowser();
 
       if (maxX < 0) {
         setProgress(100, 'Finished');
@@ -234,11 +240,11 @@
 
       const cropW = maxX - minX + 1;
       const cropH = maxY - minY + 1;
-      trimmed.textContent = `${cropW} × ${cropH} px`;
+      trimmed.textContent = `${cropW.toLocaleString()} × ${cropH.toLocaleString()} px`;
 
-      setProgress(70, 'Cropping transparent edges…');
-      status.textContent = 'Cropping transparent edges…';
-      await yieldToBrowser();
+      setProgress(72, 'Cropping transparent edges…');
+      status.textContent = 'Removing the transparent border…';
+      await waitForBrowser();
 
       const scale = Math.min(maxSize / cropW, maxSize / cropH, 1);
       const outW = Math.max(1, Math.round(cropW * scale));
@@ -246,42 +252,56 @@
 
       canvas.width = outW;
       canvas.height = outH;
-
-      setProgress(82, `Resizing to ${outW.toLocaleString()} × ${outH.toLocaleString()} px…`);
-      status.textContent = 'Resizing image…';
       const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas unavailable');
+      ctx.clearRect(0, 0, outW, outH);
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      const source = await createImageBitmap(file);
-      ctx.clearRect(0, 0, outW, outH);
-      ctx.drawImage(source, minX, minY, cropW, cropH, 0, 0, outW, outH);
-      source.close();
+      setProgress(82, `Resizing to ${outW.toLocaleString()} × ${outH.toLocaleString()} px…`);
+      status.textContent = 'Creating the trimmed preview…';
+      await waitForBrowser();
 
-      await yieldToBrowser();
+      ctx.drawImage(img, minX, minY, cropW, cropH, 0, 0, outW, outH);
+
       setProgress(94, 'Creating PNG…');
-      status.textContent = 'Creating the finished PNG…';
+      status.textContent = 'Finishing the PNG…';
+      await waitForBrowser();
 
       outputBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
       if (!outputBlob) throw new Error('Could not create PNG');
 
-      output.textContent = `${outW} × ${outH} px`;
-      download.disabled = false;
+      output.textContent = `${outW.toLocaleString()} × ${outH.toLocaleString()} px`;
       stats.classList.remove('hidden');
       preview.classList.remove('hidden');
-      setProgress(100, 'Finished');
-      status.textContent = `Done — trimmed and resized locally to fit within ${maxSize} px.`;
+      readyBadge.classList.remove('hidden');
+      download.disabled = false;
+
+      setProgress(100, 'Ready');
       setBusy(false);
+      status.textContent = 'Ready — your trimmed PNG is shown below.';
     } catch (err) {
       console.error(err);
       setBusy(false);
       progressWrap.classList.add('hidden');
       spinner.classList.add('hidden');
-      status.textContent = 'Could not process that PNG. If it is very large, try a smaller image or a desktop browser.';
+      status.textContent = 'Something went wrong while processing this PNG. If it is extremely large, try a smaller copy.';
     }
   }
 
-  fileInput.addEventListener('change', processCurrentFile);
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files?.[0];
+    if (file) processFile(file);
+  });
+
+  sizeSelect.addEventListener('change', () => {
+    customWrap.classList.toggle('hidden', sizeSelect.value !== 'custom');
+    if (currentFile && !processing) processFile(currentFile);
+  });
+
+  customSize.addEventListener('change', () => {
+    if (currentFile && sizeSelect.value === 'custom' && !processing) processFile(currentFile);
+  });
 
   download.addEventListener('click', () => {
     if (!outputBlob) return;
@@ -292,28 +312,10 @@
     document.body.appendChild(a);
     a.click();
     a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
-
-  savePhotos.addEventListener('click', async () => {
-    if (!outputBlob) return;
-
-    // On iPhone/iPad, the most reliable browser-only workflow is to open
-    // the generated PNG in a new tab. From there, long-press the image and
-    // choose “Save to Photos” / “Add to Photos” in Safari.
-    const url = URL.createObjectURL(outputBlob);
-    const win = window.open(url, '_blank');
-
-    if (!win) {
-      status.textContent = 'Safari blocked the preview window. Tap Download PNG, then open the downloaded image and save it to Photos.';
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
-      return;
-    }
-
-    status.textContent = 'Image opened in a new tab. On iPhone, press and hold the image, then choose “Save to Photos” or “Add to Photos”.';
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
   });
 })();
 </script>
+
 </body>
 </html>
