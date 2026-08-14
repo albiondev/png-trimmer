@@ -32,6 +32,15 @@
   canvas { max-width:100%; max-height:320px; width:auto; height:auto; image-rendering:auto; }
   .steps { line-height:1.55; }
   .hidden { display:none !important; }
+  .batch-preview { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:12px; margin-top:18px; }
+  .batch-card { border:1px solid color-mix(in srgb, CanvasText 18%, transparent); border-radius:12px; padding:10px; }
+  .batch-card .thumb { height:130px; display:flex; align-items:center; justify-content:center; overflow:hidden; border-radius:8px;
+    background-image:linear-gradient(45deg,#aaa 25%,transparent 25%,transparent 75%,#aaa 75%),
+                      linear-gradient(45deg,#aaa 25%,transparent 25%,transparent 75%,#aaa 75%);
+    background-position:0 0,10px 10px; background-size:20px 20px; }
+  .batch-card img { max-width:100%; max-height:130px; }
+  .batch-card .name { margin-top:7px; font-size:.82rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .batch-card .dims { font-size:.76rem; opacity:.7; margin-top:3px; }
   .ready-badge { display:inline-block; margin-left:8px; padding:3px 8px; border-radius:999px; font-size:.75rem; background:#1f7a3f; color:#fff; vertical-align:middle; }
   .status-row { display:flex; align-items:center; gap:9px; min-height:1.8em; }
   .status { min-height:1.4em; margin:0; }
@@ -51,7 +60,7 @@
   <p>Choose a PNG. Everything happens locally in this browser — no server, upload, storage, or network connection is used.</p>
 
   <div class="controls">
-    <label>Choose PNG<input id="file" type="file" accept="image/png"></label>
+    <label>Choose PNGs<input id="file" type="file" accept="image/png" multiple></label>
     <label style="gap:8px">Maximum dimension
       <select id="size" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
         <option value="150">150 px</option>
@@ -93,7 +102,8 @@
     </label>
     <button id="resetRotation" type="button">Reset rotation</button>
     <button id="updatePreview" type="button" disabled>Update Preview</button>
-    <button id="download" type="button" disabled>Download PNG</button>
+    <button id="download" type="button" disabled>Download Current PNG</button>
+    <button id="downloadAll" type="button" disabled>Download All</button>
   </div>
 
   <p id="modeHelp" class="note">Fit artwork keeps the trimmed image’s proportions and makes its largest dimension the selected size. Rotation expands the canvas as needed so the artwork is never clipped.</p>
@@ -101,6 +111,11 @@
     <span id="spinner" class="spinner hidden" aria-hidden="true"></span>
     <p id="status" class="status" aria-live="polite">Choose a PNG to trim transparent pixels and resize it proportionally so its largest dimension fits within the selected maximum.</p>
   </div>
+  <div id="batchSummary" class="box hidden" style="margin:12px 0">
+    <strong id="batchTitle"></strong>
+    <div id="batchText" class="note" style="margin-top:5px"></div>
+  </div>
+  <div id="batchPreview" class="batch-preview hidden"></div>
   <div id="progressWrap" class="progress-wrap hidden" aria-hidden="true">
     <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
     <div id="progressText" class="progress-text">Starting…</div>
@@ -136,6 +151,11 @@
 (() => {
   const fileInput = document.getElementById('file');
   const download = document.getElementById('download');
+  const downloadAll = document.getElementById('downloadAll');
+  const batchSummary = document.getElementById('batchSummary');
+  const batchTitle = document.getElementById('batchTitle');
+  const batchText = document.getElementById('batchText');
+  const batchPreview = document.getElementById('batchPreview');
   const updatePreview = document.getElementById('updatePreview');
   const status = document.getElementById('status');
   const spinner = document.getElementById('spinner');
@@ -168,6 +188,8 @@
   let outputBlob = null;
   let outputName = 'trimmed-300px.png';
   let currentFile = null;
+  let selectedFiles = [];
+  let batchResults = [];
   let processing = false;
 
   function getMaxSize() {
@@ -370,6 +392,7 @@
       setProgress(100, 'Ready');
       setBusy(false);
       status.textContent = 'Ready — your trimmed PNG is shown below.';
+      return { blob: outputBlob, name: outputName, width: outW, height: outH, sourceName: file.name };
     } catch (err) {
       console.error(err);
       setBusy(false);
@@ -380,8 +403,30 @@
   }
 
   fileInput.addEventListener('change', () => {
-    const file = fileInput.files?.[0];
-    if (file) processFile(file);
+    selectedFiles = Array.from(fileInput.files || []);
+    if (!selectedFiles.length) return;
+
+    currentFile = selectedFiles[0];
+    batchResults = [];
+    outputBlob = null;
+    download.disabled = true;
+    downloadAll.disabled = true;
+    updatePreview.disabled = false;
+    batchPreview.innerHTML = '';
+    batchPreview.classList.add('hidden');
+    batchSummary.classList.add('hidden');
+    stats.classList.add('hidden');
+    preview.classList.add('hidden');
+    empty.classList.add('hidden');
+
+    if (selectedFiles.length === 1) {
+      status.textContent = 'PNG selected — press Update Preview to process it.';
+    } else {
+      batchSummary.classList.remove('hidden');
+      batchTitle.textContent = `${selectedFiles.length} PNGs selected`;
+      batchText.textContent = 'The same settings will be applied to every image. Press Update Preview to process the whole batch.';
+      status.textContent = `${selectedFiles.length} PNGs selected — ready to process.`;
+    }
   });
 
   sizeSelect.addEventListener('change', () => {
@@ -423,11 +468,134 @@
     if (currentFile && !processing) updatePreview.disabled = false;
   });
 
-  updatePreview.addEventListener('click', () => {
-    if (currentFile && !processing) processFile(currentFile);
+  updatePreview.addEventListener('click', async () => {
+    if (!selectedFiles.length || processing) return;
+
+    if (selectedFiles.length === 1) {
+      await processFile(selectedFiles[0]);
+      return;
+    }
+
+    batchResults = [];
+    batchPreview.innerHTML = '';
+    batchPreview.classList.remove('hidden');
+    batchSummary.classList.remove('hidden');
+    batchTitle.textContent = `Processing ${selectedFiles.length} PNGs…`;
+    batchText.textContent = 'Please keep this page open until processing is complete.';
+    download.disabled = true;
+    downloadAll.disabled = true;
+
+    for (let i = 0; i < selectedFiles.length; i++) {
+      const file = selectedFiles[i];
+      status.textContent = `Processing ${file.name} (${i + 1} of ${selectedFiles.length})…`;
+      const result = await processFile(file);
+      if (result) {
+        batchResults.push(result);
+        const card = document.createElement('div');
+        card.className = 'batch-card';
+
+        const thumb = document.createElement('div');
+        thumb.className = 'thumb';
+        const img = document.createElement('img');
+        img.src = URL.createObjectURL(result.blob);
+        img.alt = result.sourceName;
+        thumb.appendChild(img);
+
+        const name = document.createElement('div');
+        name.className = 'name';
+        name.textContent = result.name;
+
+        const dims = document.createElement('div');
+        dims.className = 'dims';
+        dims.textContent = `${result.width} × ${result.height} px`;
+
+        card.append(thumb, name, dims);
+        batchPreview.appendChild(card);
+      }
+    }
+
+    batchTitle.textContent = `Batch complete — ${batchResults.length} of ${selectedFiles.length} ready`;
+    batchText.textContent = batchResults.length
+      ? 'Preview thumbnails are shown below. Download All creates one ZIP containing the processed PNGs.'
+      : 'No images could be processed.';
+    downloadAll.disabled = batchResults.length === 0;
+    updatePreview.disabled = true;
+    setBusy(false);
+    progressWrap.classList.add('hidden');
+    spinner.classList.add('hidden');
+    status.textContent = batchResults.length
+      ? 'Batch ready — you can download all processed PNGs as one ZIP.'
+      : 'Batch processing finished with no successful results.';
   });
 
-  refreshSquareControls();
+
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(bytes) {
+    let c = 0 ^ -1;
+    for (let i = 0; i < bytes.length; i++) c = (c >>> 8) ^ CRC_TABLE[(c ^ bytes[i]) & 255];
+    return (c ^ -1) >>> 0;
+  }
+  function u16(n) { return [n & 255, (n >>> 8) & 255]; }
+  function u32(n) { return [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255]; }
+
+  async function makeZip(results) {
+    const chunks = [], central = [];
+    let offset = 0;
+    const enc = new TextEncoder();
+
+    for (const r of results) {
+      const name = enc.encode(r.name);
+      const data = new Uint8Array(await r.blob.arrayBuffer());
+      const crc = crc32(data);
+      const local = new Uint8Array([
+        80,75,3,4, 20,0, 0,0, 0,0, 0,0, 0,0,
+        ...u32(crc), ...u32(data.length), ...u32(data.length),
+        ...u16(name.length), 0,0, ...name
+      ]);
+      chunks.push(local, data);
+
+      const cen = new Uint8Array([
+        80,75,1,2, 20,0,20,0, 0,0,0,0,0,0,0,0,
+        ...u32(crc), ...u32(data.length), ...u32(data.length),
+        ...u16(name.length), 0,0,0,0,0,0,0,0,0,0, ...u32(offset), ...name
+      ]);
+      central.push(cen);
+      offset += local.length + data.length;
+    }
+
+    const centralSize = central.reduce((n, x) => n + x.length, 0);
+    const end = new Uint8Array([
+      80,75,5,6, 0,0,0,0, ...u16(results.length), ...u16(results.length),
+      ...u32(centralSize), ...u32(offset), 0,0
+    ]);
+    return new Blob([...chunks, ...central, end], {type:'application/zip'});
+  }
+
+  downloadAll.addEventListener('click', async () => {
+    if (!batchResults.length || processing) return;
+    downloadAll.disabled = true;
+    status.textContent = 'Creating ZIP locally…';
+    const zip = await makeZip(batchResults);
+    const url = URL.createObjectURL(zip);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'png-trimmer-batch.zip';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    downloadAll.disabled = false;
+    status.textContent = 'Batch ZIP downloaded.';
+  });
 
   download.addEventListener('click', () => {
     if (!outputBlob) return;
