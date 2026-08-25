@@ -332,7 +332,9 @@
       // Scale after rotation so the rotated artwork fits the requested size.
       // This is important for square output: the corners of a rotated image
       // must not be clipped by the fixed square canvas.
-      const scale = Math.min(maxSize / rotatedW, maxSize / rotatedH, 1);
+      const fitW = outputMode.value === 'backdrop' ? 1200 : maxSize;
+      const fitH = outputMode.value === 'backdrop' ? 700 : maxSize;
+      const scale = Math.min(fitW / rotatedW, fitH / rotatedH, 1);
       const baseArtworkW = Math.max(1, Math.ceil(rotatedW * scale));
       const baseArtworkH = Math.max(1, Math.ceil(rotatedH * scale));
       const square = outputMode.value === 'square';
@@ -447,7 +449,7 @@
     if (square) {
       modeHelp.textContent = 'Square canvas: both output dimensions are exactly the selected size. Alignment and Artwork size control the artwork within the square.';
     } else if (backdrop) {
-      modeHelp.textContent = 'Backdrop: exact 1200 × 700 px transparent canvas. The trimmed artwork is fitted proportionally inside it without stretching or clipping. Alignment, Artwork size and Rotation are available.';
+      modeHelp.textContent = 'Backdrop: exact 1200 × 700 px transparent canvas. The trimmed artwork is scaled as large as possible while staying fully inside the canvas (so it fills the 1200 px width whenever the artwork ratio allows). Alignment, Artwork size and Rotation are available.';
     } else {
       modeHelp.textContent = 'Fit artwork: the trimmed image keeps its proportions and its largest dimension is the selected size. Fixed-canvas controls affect Square and Backdrop modes.';
     }
