@@ -80,6 +80,7 @@
       <select id="outputMode" style="display:block;border:0;background:transparent;color:inherit;font:inherit;outline:none">
         <option value="fit" selected>Fit artwork (preserve aspect ratio)</option>
         <option value="square">Square canvas (center artwork)</option>
+        <option value="backdrop">Backdrop — 1200 × 700 px</option>
       </select>
     </label>
     <div id="alignmentHelp" class="note">Square alignment controls the vertical position when Square canvas is selected.</div>
@@ -335,11 +336,15 @@
       const baseArtworkW = Math.max(1, Math.ceil(rotatedW * scale));
       const baseArtworkH = Math.max(1, Math.ceil(rotatedH * scale));
       const square = outputMode.value === 'square';
-      const sizeFactor = square ? Number(artworkScale.value) / 100 : 1;
+      const backdrop = outputMode.value === 'backdrop';
+      const fixedCanvas = square || backdrop;
+      const canvasW = square ? maxSize : 1200;
+      const canvasH = square ? maxSize : 700;
+      const sizeFactor = fixedCanvas ? Number(artworkScale.value) / 100 : 1;
       const artworkW = Math.max(1, Math.round(baseArtworkW * sizeFactor));
       const artworkH = Math.max(1, Math.round(baseArtworkH * sizeFactor));
-      const outW = square ? maxSize : artworkW;
-      const outH = square ? maxSize : artworkH;
+      const outW = fixedCanvas ? canvasW : artworkW;
+      const outH = fixedCanvas ? canvasH : artworkH;
 
       canvas.width = outW;
       canvas.height = outH;
@@ -349,9 +354,9 @@
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
 
-      const centreX = square ? outW / 2 : artworkW / 2;
+      const centreX = fixedCanvas ? outW / 2 : artworkW / 2;
       let centreY = artworkH / 2;
-      if (square) {
+      if (fixedCanvas) {
         if (alignment.value === 'top') centreY = artworkH / 2;
         else if (alignment.value === 'bottom') centreY = outH - artworkH / 2;
         else centreY = outH / 2;
@@ -438,9 +443,14 @@
   });
   function refreshSquareControls() {
     const square = outputMode.value === 'square';
-    modeHelp.textContent = square
-      ? 'Square canvas: both output dimensions are exactly the selected size. Alignment controls where the artwork sits, and Artwork size lets you make it smaller within the square.'
-      : 'Fit artwork: the trimmed image keeps its proportions and its largest dimension is the selected size. Square-only controls are still shown, but only affect the result when Square canvas is selected.';
+    const backdrop = outputMode.value === 'backdrop';
+    if (square) {
+      modeHelp.textContent = 'Square canvas: both output dimensions are exactly the selected size. Alignment and Artwork size control the artwork within the square.';
+    } else if (backdrop) {
+      modeHelp.textContent = 'Backdrop: exact 1200 × 700 px transparent canvas. The trimmed artwork is fitted proportionally inside it without stretching or clipping. Alignment, Artwork size and Rotation are available.';
+    } else {
+      modeHelp.textContent = 'Fit artwork: the trimmed image keeps its proportions and its largest dimension is the selected size. Fixed-canvas controls affect Square and Backdrop modes.';
+    }
   }
 
   outputMode.addEventListener('change', () => {
@@ -449,12 +459,12 @@
   });
 
   alignment.addEventListener('change', () => {
-    if (currentFile && outputMode.value === 'square' && !processing) updatePreview.disabled = false;
+    if (currentFile && (outputMode.value === 'square' || outputMode.value === 'backdrop') && !processing) updatePreview.disabled = false;
   });
 
   artworkScale.addEventListener('input', () => {
     artworkScaleValue.textContent = `${artworkScale.value}%`;
-    if (currentFile && outputMode.value === 'square' && !processing) updatePreview.disabled = false;
+    if (currentFile && (outputMode.value === 'square' || outputMode.value === 'backdrop') && !processing) updatePreview.disabled = false;
   });
 
   rotation.addEventListener('input', () => {
